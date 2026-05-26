@@ -1,0 +1,21 @@
+meta {
+  name: Buscar jogador por nome
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/players/search?name=lebron
+  body: none
+  auth: none
+}
+
+params:query {
+  name: lebron
+}
+
+docs {
+  Busca jogadores pelo nome. Retorna `id`, `full_name` e `is_active`.
+
+  Exemplos: lebron, curry, durant, jokic.
+}

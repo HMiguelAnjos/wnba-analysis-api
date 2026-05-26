@@ -1,0 +1,20 @@
+docs {
+  # NBA Analysis API
+
+  Collection completa para testar a NBA Analysis API.
+
+  ## Variáveis (em `environments/local.bru`)
+  - `base_url` — endereço da API (padrão: http://localhost:8000)
+  - `player_id` — ID do jogador (padrão: 2544 = LeBron James)
+  - `game_id` — ID de um jogo histórico
+  - `live_game_id` — ID de um jogo ao vivo (buscar em /games/live/today)
+  - `season` — temporada histórica (padrão: 2024-25)
+  - `live_season` — temporada atual para rotas live (padrão: 2024-25)
+
+  ## Fluxo sugerido
+  1. GET /health → confirma que a API está rodando
+  2. GET /players/search → pega o player_id
+  3. GET /players/{player_id}/gamelog → pega um game_id histórico
+  4. GET /games/live/today → pega um live_game_id
+  5. Demais rotas de análise e live
+}

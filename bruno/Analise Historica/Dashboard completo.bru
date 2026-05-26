@@ -1,0 +1,27 @@
+meta {
+  name: Dashboard completo
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{base_url}}/players/{{player_id}}/dashboard?season={{season}}&last_games=10
+  body: none
+  auth: none
+}
+
+params:query {
+  season: {{season}}
+  last_games: 10
+}
+
+docs {
+  Resposta combinada com:
+  - Resumo da temporada
+  - Médias dos últimos 5 e 10 jogos
+  - Pontos por quarto nos últimos N jogos
+  - Lista de jogos recentes
+  - Tendência: above_average / below_average / stable
+
+  ⚠️ Inclui cálculo de pontos por quarto — pode ser lento na primeira chamada.
+}

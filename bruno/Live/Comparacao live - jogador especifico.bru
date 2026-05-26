@@ -1,0 +1,21 @@
+meta {
+  name: Comparação live — jogador específico
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{base_url}}/players/{{player_id}}/games/{{live_game_id}}/live-comparison?season={{live_season}}
+  body: none
+  auth: none
+}
+
+params:query {
+  season: {{live_season}}
+}
+
+docs {
+  Compara as estatísticas atuais de um jogador específico com sua média da temporada.
+
+  Retorna erro 404 se o jogador ainda não entrou em quadra no jogo.
+}

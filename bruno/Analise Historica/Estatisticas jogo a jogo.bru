@@ -1,0 +1,20 @@
+meta {
+  name: Estatísticas jogo a jogo
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/players/{{player_id}}/stats/games?season={{season}}
+  body: none
+  auth: none
+}
+
+params:query {
+  season: {{season}}
+}
+
+docs {
+  Lista de todos os jogos com pontos, rebotes, assistências e minutos.
+  Ideal para montar gráficos de linha no frontend.
+}

@@ -1,0 +1,23 @@
+meta {
+  name: Jogos do dia (scoreboard)
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/games/live/today
+  body: none
+  auth: none
+}
+
+docs {
+  Lista todos os jogos do dia com:
+  - Status: not_started / in_progress / final
+  - Placar atual
+  - Período e clock
+  - Times (nome, tricode)
+
+  Use o `game_id` retornado nas demais rotas live.
+
+  📝 Cache de 30 segundos.
+}

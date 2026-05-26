@@ -1,0 +1,20 @@
+meta {
+  name: Pontos por quarto — jogador num jogo específico
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/players/{{player_id}}/games/{{game_id}}/points-by-period
+  body: none
+  auth: none
+}
+
+docs {
+  Calcula os pontos do jogador por quarto em um jogo específico usando play-by-play.
+
+  Contabiliza:
+  - Field goals (2 pts)
+  - Three-pointers (3 pts)
+  - Free throws convertidos (1 pt)
+}

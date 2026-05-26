@@ -1,0 +1,23 @@
+meta {
+  name: Análise geral da temporada
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/players/{{player_id}}/analysis/season?season={{season}}
+  body: none
+  auth: none
+}
+
+params:query {
+  season: {{season}}
+}
+
+docs {
+  Retorna:
+  - Médias gerais da temporada (pontos, rebotes, assistências, minutos)
+  - Médias dos últimos 5 jogos
+  - Médias dos últimos 10 jogos
+  - Trend: diferença entre últimos 5 e média geral
+}

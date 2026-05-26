@@ -1,0 +1,34 @@
+meta {
+  name: Análise live — todos os jogadores
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/games/{{live_game_id}}/live-analysis?season={{live_season}}
+  body: none
+  auth: none
+}
+
+params:query {
+  season: {{live_season}}
+}
+
+docs {
+  Para cada jogador que já entrou em quadra, compara estatísticas atuais com a média da temporada.
+
+  Fórmulas:
+  - `expected = season_avg × (current_minutes / season_avg_minutes)`
+  - `score = pts_diff×1.0 + reb_diff×0.7 + ast_diff×0.8`
+
+  Status por score:
+  - hot           → score ≥ 5
+  - above_average → score ≥ 2
+  - normal        → score entre -2 e 2
+  - below_average → score ≤ -2
+  - cold          → score ≤ -5
+
+  ⚠️ A primeira chamada busca a média da temporada de cada jogador via nba_api. Pode levar 1–3 minutos. Chamadas seguintes (dentro de 10 min) usam cache.
+
+  📝 Marcado como experimental: `analysis_type = experimental_live_analysis`.
+}

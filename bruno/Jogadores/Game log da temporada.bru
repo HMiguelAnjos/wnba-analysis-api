@@ -1,0 +1,21 @@
+meta {
+  name: Game log da temporada
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/players/{{player_id}}/gamelog?season={{season}}
+  body: none
+  auth: none
+}
+
+params:query {
+  season: {{season}}
+}
+
+docs {
+  Retorna todos os jogos do jogador na temporada.
+
+  Use o campo `game_id` retornado para consultar play-by-play e pontos por período.
+}

@@ -1,0 +1,16 @@
+meta {
+  name: Hot ranking — top 10 jogadores
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{base_url}}/games/{{live_game_id}}/live-hot-ranking?season={{live_season}}&limit=10
+  body: none
+  auth: none
+}
+
+params:query {
+  season: {{live_season}}
+  limit: 10
+}

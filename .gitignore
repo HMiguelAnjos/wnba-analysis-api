@@ -1,0 +1,66 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Backtester cache local (PBP, boxscores, gamelogs).
+# Cada dev faz fetch na primeira vez; ~200MB pra 1000 jogos.
+data/backtester/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.venv-1/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Build and packaging artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Logs and runtime files
+*.log
+*.pid
+*.seed
+*.out
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local agent/config folders
+.claude/
+
+# Local Docker overrides
+.docker/
+
+# Fixtures de testes — JSONs reais baixados da NBA pra testar offline.
+# Cada dev gera os seus localmente via `python scripts/fetch_fixtures.py`.
+tests/fixtures/*.json

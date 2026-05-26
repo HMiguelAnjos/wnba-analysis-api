@@ -1,0 +1,19 @@
+meta {
+  name: Play-by-play de um jogo
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/games/{{game_id}}/play-by-play
+  body: none
+  auth: none
+}
+
+docs {
+  Retorna todos os eventos do play-by-play de um jogo finalizado.
+
+  Como obter um `game_id`:
+  1. GET /players/{player_id}/gamelog
+  2. Copie o campo `game_id` de qualquer jogo
+}

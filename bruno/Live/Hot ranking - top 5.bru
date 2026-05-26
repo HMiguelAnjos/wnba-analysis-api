@@ -1,0 +1,22 @@
+meta {
+  name: Hot ranking — top 5 jogadores
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{base_url}}/games/{{live_game_id}}/live-hot-ranking?season={{live_season}}&limit=5
+  body: none
+  auth: none
+}
+
+params:query {
+  season: {{live_season}}
+  limit: 5
+}
+
+docs {
+  Retorna os N jogadores com maior score no jogo atual, ordenados do melhor para o pior.
+
+  Útil para identificar rapidamente quem está dominando o jogo.
+}

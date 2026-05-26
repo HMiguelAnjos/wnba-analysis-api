@@ -1,0 +1,22 @@
+meta {
+  name: Boxscore live
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/games/{{live_game_id}}/live-boxscore
+  body: none
+  auth: none
+}
+
+docs {
+  Retorna estatísticas em tempo real de todos os jogadores que já entraram em quadra.
+
+  Inclui para cada jogador:
+  - Minutos, pontos, rebotes, assistências
+  - FG, 3PT, FT feitos/tentados
+  - Plus/minus
+
+  📝 Cache de 15 segundos.
+}

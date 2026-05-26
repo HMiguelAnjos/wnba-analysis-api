@@ -1,0 +1,15 @@
+meta {
+  name: Buscar jogador por nome — Curry
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/players/search?name=curry
+  body: none
+  auth: none
+}
+
+params:query {
+  name: curry
+}

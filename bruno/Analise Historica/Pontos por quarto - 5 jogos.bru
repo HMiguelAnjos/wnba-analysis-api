@@ -1,0 +1,16 @@
+meta {
+  name: Média de pontos por quarto — últimos 5 jogos
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{base_url}}/players/{{player_id}}/analysis/points-by-period?season={{season}}&last_games=5
+  body: none
+  auth: none
+}
+
+params:query {
+  season: {{season}}
+  last_games: 5
+}
