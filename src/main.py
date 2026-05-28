@@ -21,6 +21,7 @@ from src.schemas.live_schemas import (
     LiveGamesCachedResponseSchema,
     LivePlayerComparisonSchema,
     TodayGamesSchema,
+    TodayHotRankingsSchema,
 )
 from src.schemas.nba_schemas import (
     GameLogSchema,
@@ -637,6 +638,60 @@ def today_games():
         scoreboard_source=snapshot.data.source,
         all_final=snapshot.data.all_final,
     )
+
+
+@app.get("/games/today/hot-rankings", response_model=TodayHotRankingsSchema)
+def today_hot_rankings(
+    season: str = _season_query(),
+    limit: int = Query(20, ge=1, le=50, description="Jogadores por jogo no ranking"),
+    consider_blowout: bool | None = Query(
+        None,
+        description=(
+            "Considerar ajuste de blowout na projeção. "
+            "Padrão: auto-detecta (playoffs=False, resto=True). "
+            "Use True/False para forçar."
+        ),
+    ),
+):
+    """
+    Hot rankings consolidado de TODOS os jogos do dia (in_progress + final).
+
+    Pré-jogo não entra (sem stats). Pra cada jogo elegível, o backend
+    calcula o ranking em paralelo. Resultado é cacheado por 15s pra
+    suportar polling do front sem refazer todo o cálculo a cada request.
+
+    Tolerante a falha: se um jogo específico der erro, vai pra `errors`
+    e os demais saem normalmente — a tela "Todos os jogos" do Hot Picks
+    não quebra por causa de um game_id problemático.
+    """
+    # Fonte de jogos: ESPN se disponível (mesma do /games/live/today),
+    # senão fallback pro snapshot do worker (raramente acontece na WNBA).
+    games: list = []
+    if getattr(nba, "_espn", None) is not None:
+        try:
+            today = nba._espn.get_today_games()
+            games = list(today.games)
+        except Exception:  # noqa: BLE001
+            # ESPN indisponível — retorna vazio em vez de 502 (a tela
+            # mostra empty state amigável).
+            from datetime import datetime, timezone
+            return TodayHotRankingsSchema(
+                season=season, items=[], errors=[],
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+    else:
+        snapshot = live_cache.get_snapshot()
+        games = list(snapshot.data.games) if snapshot is not None else []
+
+    try:
+        return live_analysis.get_all_today_hot_rankings(
+            season, limit, games, consider_blowout=consider_blowout,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502,
+            detail=f"Erro ao agregar hot rankings do dia: {exc}",
+        )
 
 
 @app.get("/games/{game_id}/live-boxscore", response_model=LiveBoxscoreSchema)

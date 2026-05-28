@@ -528,6 +528,50 @@ class HotRankingSchema(BaseModel):
 
 
 # ------------------------------------------------------------------ #
+# Today hot rankings (agregado de todos os jogos)                    #
+# ------------------------------------------------------------------ #
+# Usado por GET /games/today/hot-rankings — a tela "Todos os jogos"
+# do Hot Picks consome um único request agregado em vez de N chamadas
+# ao endpoint por-jogo. Backend pode paralelizar internamente e
+# cachear o resultado consolidado por alguns segundos.
+
+class TodayHotRankingErrorSchema(BaseModel):
+    """Falha pontual ao calcular hot ranking de um jogo específico.
+
+    O endpoint é tolerante: se 1 jogo falha, devolve os outros + a lista
+    de erros pra o front decidir se mostra um aviso discreto. Não
+    derrubamos a página inteira por causa de 1 game_id problemático.
+    """
+    game_id: str
+    reason: str                                                    # mensagem curta, segura pra logar
+
+
+class TodayHotRankingItemSchema(BaseModel):
+    """Hot ranking de UM jogo + meta básica (placar/relógio) embutida.
+
+    `ranking` aqui é o mesmo HotRankingSchema do endpoint por-jogo;
+    nada muda na shape interna do ranking — assim o front reusa toda
+    a lógica de buildOpportunities.
+    """
+    game_id: str
+    away_tricode: str
+    home_tricode: str
+    away_score: int
+    home_score: int
+    game_status: str                                               # not_started | in_progress | final
+    period: int
+    clock: str
+    ranking: HotRankingSchema
+
+
+class TodayHotRankingsSchema(BaseModel):
+    season: str
+    items: list[TodayHotRankingItemSchema]
+    errors: list[TodayHotRankingErrorSchema] = []
+    updated_at: str                                                # ISO 8601 UTC
+
+
+# ------------------------------------------------------------------ #
 # Live games cached response                                          #
 # ------------------------------------------------------------------ #
 

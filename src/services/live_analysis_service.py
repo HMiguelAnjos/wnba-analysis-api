@@ -30,6 +30,9 @@ from src.schemas.live_schemas import (
     QuarterStatsSchema,
     RotationContextSchema,
     SimilarGamesResultSchema,
+    TodayHotRankingErrorSchema,
+    TodayHotRankingItemSchema,
+    TodayHotRankingsSchema,
 )
 from src.schemas.anomaly_schemas import (
     AnomalyPlayerStatsSchema,
@@ -1821,3 +1824,109 @@ class LiveAnalysisService:
             blowout_risk=blowout_payload,
             updated_at=datetime.now(timezone.utc).isoformat(),
         )
+
+    # ── Hot rankings agregado de TODOS os jogos do dia ───────────────────
+    # Usado pela tela "Todos os jogos" do Hot Picks (front). Em vez do
+    # cliente abrir N requests pro endpoint por-jogo, ele faz 1 só e
+    # recebe a lista consolidada — o backend paraleliza internamente
+    # e cacheia o resultado por alguns segundos pra suportar polling.
+
+    # TTL curto: 15s é o suficiente pra reduzir N x get_hot_ranking
+    # entre polls sem deixar o ranking visivelmente velho (cada
+    # get_hot_ranking já tem custo ≥ 1-2s).
+    _ALL_TODAY_TTL = 15
+
+    def get_all_today_hot_rankings(
+        self,
+        season: str,
+        limit: int,
+        games: list,  # list[LiveGameSchema] — caller extrai da fonte (worker/ESPN)
+        consider_blowout: Optional[bool] = None,
+    ) -> TodayHotRankingsSchema:
+        """Calcula hot ranking pra todos os jogos vivos/finalizados do dia.
+
+        Caller passa a lista de jogos. Desacopla o service da fonte:
+        NBA usa o snapshot do worker, WNBA usa ESPN. Mesma função.
+
+        Tolerante a falha por jogo: se um get_hot_ranking falha, o jogo cai
+        em `errors` com a razão e os outros são entregues normalmente. O
+        front decide se mostra um aviso discreto.
+
+        Paralelização: ThreadPoolExecutor — get_hot_ranking é I/O-bound
+        (ESPN + odds proxies) e o GIL libera durante o I/O. max_workers=8
+        cobre cards da WNBA (5-8 jogos/dia tipicamente) sem explodir
+        thread count.
+        """
+        cache_key = f"today_hot_rankings:{season}:{limit}:{consider_blowout}"
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # Pré-jogo não tem stats → nada pra rankear.
+        eligible = [
+            g for g in (games or [])
+            if g.game_status in ("in_progress", "final")
+        ]
+
+        if not eligible:
+            return TodayHotRankingsSchema(
+                season=season,
+                items=[],
+                errors=[],
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+        items: list[TodayHotRankingItemSchema] = []
+        errors: list[TodayHotRankingErrorSchema] = []
+
+        def _one(game) -> tuple[str, Optional[HotRankingSchema], Optional[str]]:
+            try:
+                ranking = self.get_hot_ranking(
+                    game.game_id, season, limit,
+                    consider_blowout=consider_blowout,
+                )
+                return game.game_id, ranking, None
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "get_all_today_hot_rankings: jogo %s falhou: %s",
+                    game.game_id, exc,
+                )
+                return game.game_id, None, str(exc)
+
+        results: dict[str, tuple[Optional[HotRankingSchema], Optional[str]]] = {}
+        with ThreadPoolExecutor(max_workers=8, thread_name_prefix="all-rankings") as ex:
+            futures = {ex.submit(_one, g): g for g in eligible}
+            for fut in as_completed(futures):
+                gid, ranking, err = fut.result()
+                results[gid] = (ranking, err)
+
+        # Preserva ordem do snapshot pra não embaralhar o feed entre polls.
+        for game in eligible:
+            ranking, err = results.get(game.game_id, (None, "missing"))
+            if ranking is not None:
+                items.append(
+                    TodayHotRankingItemSchema(
+                        game_id=game.game_id,
+                        away_tricode=game.away_team.tricode,
+                        home_tricode=game.home_team.tricode,
+                        away_score=game.away_team.score,
+                        home_score=game.home_team.score,
+                        game_status=game.game_status,
+                        period=game.period,
+                        clock=game.clock,
+                        ranking=ranking,
+                    )
+                )
+            elif err is not None:
+                errors.append(
+                    TodayHotRankingErrorSchema(game_id=game.game_id, reason=err)
+                )
+
+        result = TodayHotRankingsSchema(
+            season=season,
+            items=items,
+            errors=errors,
+            updated_at=datetime.now(timezone.utc).isoformat(),
+        )
+        self._cache.set(cache_key, result, self._ALL_TODAY_TTL)
+        return result
