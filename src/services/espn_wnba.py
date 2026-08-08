@@ -27,6 +27,7 @@ from typing import Optional
 
 import requests
 
+from src.config import STATS_PROXY
 from src.schemas.nba_schemas import GameLogSchema, PlayerSchema
 from src.utils.cache import PersistentCache
 from src.utils.converters import normalize_player_name
@@ -46,6 +47,48 @@ _HEADERS = {
     ),
     "Accept": "application/json, text/plain, */*",
 }
+
+# Proxy — reutiliza STATS_PROXY (mesmo residencial usado pra stats.nba.com).
+# Motivo: a ESPN (Akamai) bloqueia IPs de cloud/data-center → 403 Access
+# Denied em cima de tudo (scoreboard, boxscore, roster, gamelog). Local
+# funciona; Railway não. Com proxy residencial (ScraperAPI/Webshare) passa.
+# Sem STATS_PROXY setado, mantém o comportamento antigo (chamada direta).
+_PROXIES: Optional[dict] = (
+    {"http": STATS_PROXY, "https": STATS_PROXY} if STATS_PROXY else None
+)
+# ScraperAPI termina TLS no proxy → precisa skip verify. Outros proxies
+# (Webshare, residencial CONNECT-tunnel) mantêm verify=True normal.
+_VERIFY_SSL: bool = not (STATS_PROXY and "scraperapi" in STATS_PROXY.lower())
+
+
+def _get(url: str, params: Optional[dict] = None, timeout: int = _TIMEOUT):
+    """
+    requests.get wrapper com proxy + headers ESPN padrão.
+    Usar SEMPRE ao invés de requests.get direto neste módulo — assim
+    o proxy fica em UM lugar só e o log de "sem proxy" fica visível
+    no startup.
+    """
+    return requests.get(
+        url,
+        params=params,
+        headers=_HEADERS,
+        timeout=timeout,
+        proxies=_PROXIES,
+        verify=_VERIFY_SSL,
+    )
+
+
+if _PROXIES:
+    logger.info(
+        "EspnWnbaSource: roteando via STATS_PROXY (verify_ssl=%s)",
+        _VERIFY_SSL,
+    )
+else:
+    logger.warning(
+        "EspnWnbaSource: SEM proxy — ESPN bloqueia IPs de cloud/DC. "
+        "Se rodando em prod (Railway/etc), setar STATS_PROXY.",
+    )
+
 
 ROSTER_TTL = 24 * 3600   # lista de jogadoras muda raramente
 GAMELOG_TTL = 1800       # 30 min — temporada corrente atualiza durante a rodada
@@ -108,7 +151,7 @@ class EspnWnbaSource:
             return cached
         out: list[dict] = []
         try:
-            r = requests.get(f"{_SITE}/teams", headers=_HEADERS, timeout=_TIMEOUT)
+            r = _get(f"{_SITE}/teams")
             r.raise_for_status()
             for t in r.json()["sports"][0]["leagues"][0]["teams"]:
                 tm = t["team"]
@@ -136,9 +179,7 @@ class EspnWnbaSource:
         for tm in self._teams():
             tid = tm["id"]
             try:
-                r = requests.get(
-                    f"{_SITE}/teams/{tid}/roster", headers=_HEADERS, timeout=_TIMEOUT
-                )
+                r = _get(f"{_SITE}/teams/{tid}/roster")
                 r.raise_for_status()
                 for a in r.json().get("athletes", []):
                     pid = a.get("id")
@@ -204,9 +245,7 @@ class EspnWnbaSource:
         games: list = []
         date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         try:
-            r = requests.get(
-                f"{_SITE}/scoreboard", headers=_HEADERS, timeout=_TIMEOUT
-            )
+            r = _get(f"{_SITE}/scoreboard")
             r.raise_for_status()
             data = r.json()
         except Exception as exc:
@@ -274,7 +313,7 @@ class EspnWnbaSource:
         # id -> {abbr, name}
         info: dict[str, dict] = {}
         try:
-            r = requests.get(f"{_SITE}/teams", headers=_HEADERS, timeout=_TIMEOUT)
+            r = _get(f"{_SITE}/teams")
             r.raise_for_status()
             for t in r.json()["sports"][0]["leagues"][0]["teams"]:
                 tm = t["team"]
@@ -289,9 +328,8 @@ class EspnWnbaSource:
         teams: list = []
         for tid, meta in info.items():
             try:
-                rs = requests.get(
+                rs = _get(
                     f"{_CORE}/seasons/{year}/types/2/teams/{tid}/statistics",
-                    headers=_HEADERS, timeout=_TIMEOUT,
                 )
                 if rs.status_code != 200:
                     continue
@@ -336,10 +374,7 @@ class EspnWnbaSource:
         _STATE = {"pre": "not_started", "in": "in_progress", "post": "final"}
 
         try:
-            r = requests.get(
-                f"{_SITE}/summary", params={"event": game_id},
-                headers=_HEADERS, timeout=_TIMEOUT,
-            )
+            r = _get(f"{_SITE}/summary", params={"event": game_id})
             r.raise_for_status()
             d = r.json()
         except Exception as exc:
@@ -460,7 +495,7 @@ class EspnWnbaSource:
         def _fetch(season_param: Optional[int]) -> Optional[dict]:
             params = {"season": season_param} if season_param else {}
             try:
-                r = requests.get(url, params=params, headers=_HEADERS, timeout=_TIMEOUT)
+                r = _get(url, params=params)
                 r.raise_for_status()
                 return r.json()
             except Exception as exc:
