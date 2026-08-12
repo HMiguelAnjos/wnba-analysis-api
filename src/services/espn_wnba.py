@@ -29,7 +29,7 @@ import requests
 
 from src.config import STATS_PROXY
 from src.schemas.nba_schemas import GameLogSchema, PlayerSchema
-from src.utils.cache import PersistentCache
+from src.utils.cache import PersistentCache, SimpleCache
 from src.utils.converters import normalize_player_name
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,12 @@ else:
 
 ROSTER_TTL = 24 * 3600   # lista de jogadoras muda raramente
 GAMELOG_TTL = 1800       # 30 min — temporada corrente atualiza durante a rodada
+# Caches curtos in-memory pra endpoints "quentes" — SEM ELES, cada request
+# do front vira 1 request ESPN via ScraperAPI (queima credit rápido). Com
+# esses TTLs, N users pollando ficam servidos do mesmo hit ESPN.
+SCOREBOARD_TTL = 30      # 30s — placar/status muda em segundos, 30s é OK
+BOXSCORE_TTL = 5         # 5s — clock/placar precisam ser fresh no live
+TEAM_BOARD_TTL = 1800    # 30 min — médias de time mudam ao longo do dia
 
 
 def _year_from_season(season: str) -> Optional[int]:
@@ -142,6 +148,9 @@ class EspnWnbaSource:
         self._gamelog_cache = PersistentCache(
             path=os.path.join(cdir, "espn_wnba_gamelog_cache.json")
         )
+        # Caches in-memory pros endpoints "quentes" chamados pelo front.
+        # Não persistir: TTL curto e ScraperAPI cobra por chamada nova.
+        self._live_cache = SimpleCache()
 
     # ── Times / rosters ──────────────────────────────────────────────────────
     def _teams(self) -> list[dict]:
@@ -227,9 +236,13 @@ class EspnWnbaSource:
     def get_today_games(self):
         """
         Jogos do dia via ESPN scoreboard → LiveGamesCachedResponseSchema.
-        Sem cache de worker: busca na hora (a tela já faz polling). Retorna
-        a estrutura que o endpoint /games/live/today espera.
+        Cacheado in-memory por SCOREBOARD_TTL (30s) pra não queimar
+        credit do ScraperAPI a cada request do front.
         """
+        cached = self._live_cache.get("scoreboard")
+        if cached is not None:
+            return cached
+
         from datetime import datetime, timezone
         from src.schemas.live_schemas import (
             LiveGameSchema,
@@ -287,7 +300,7 @@ class EspnWnbaSource:
 
         all_final = bool(games) and all(g.game_status == "final" for g in games)
         now_iso = datetime.now(timezone.utc).isoformat()
-        return LiveGamesCachedResponseSchema(
+        result = LiveGamesCachedResponseSchema(
             date=date_str,
             games=games,
             updated_at=now_iso,
@@ -295,14 +308,24 @@ class EspnWnbaSource:
             scoreboard_source="live",
             all_final=all_final,
         )
+        self._live_cache.set("scoreboard", result, SCOREBOARD_TTL)
+        return result
 
     # ── Team board (pontos pró/contra por time) ──────────────────────────────
     def get_team_board(self, season: str):
         """
         Pontos marcados/sofridos por time da liga, via ESPN core stats
-        (avgPoints / avgPointsAllowed). 1 chamada por time (~13), cacheado
-        pelo TeamBoardService. → TeamBoardSchema.
+        (avgPoints / avgPointsAllowed). 1 chamada por time (~14) — cada
+        chamada custa 1 credit no ScraperAPI, então CACHE 30 min in-memory
+        pra não queimar 14 credits a cada request do dashboard.
+        Só cacheia o resultado bom (available=True); falhas retornam
+        sem cachear pra permitir retry rápido.
         """
+        cache_key = f"team_board:{season}"
+        cached = self._live_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         from datetime import datetime, timezone
         from src.schemas.nba_schemas import TeamBoardSchema, TeamBoardTeam
 
@@ -357,15 +380,24 @@ class EspnWnbaSource:
         if not teams:
             return TeamBoardSchema(season=str(year), updated_at=now, available=False, teams=[])
         teams.sort(key=lambda t: t.points, reverse=True)
-        return TeamBoardSchema(season=str(year), updated_at=now, available=True, teams=teams)
+        result = TeamBoardSchema(season=str(year), updated_at=now, available=True, teams=teams)
+        self._live_cache.set(cache_key, result, TEAM_BOARD_TTL)
+        return result
 
     # ── Box score ao vivo ────────────────────────────────────────────────────
     def get_live_boxscore(self, game_id: str):
         """
         Box score ao vivo via ESPN summary → LiveBoxscoreSchema. Stats por
-        jogadora (MIN/PTS/REB/AST/FG/3PT/FT/faltas) — é o que o motor de
-        análise consome pra montar ranking + projeções.
+        jogadora (MIN/PTS/REB/AST/FG/3PT/FT/faltas).
+        Cache in-memory por BOXSCORE_TTL (5s) — placar/clock precisam ser
+        fresh, mas 5s é o suficiente pra vários pollings do front baterem
+        no mesmo hit ESPN. Poupança grande no ScraperAPI.
         """
+        cache_key = f"boxscore:{game_id}"
+        cached = self._live_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         from src.schemas.live_schemas import (
             LiveBoxscoreSchema,
             LivePlayerStatsSchema,
@@ -473,7 +505,7 @@ class EspnWnbaSource:
         if home is None or away is None:
             raise RuntimeError(f"Box score ESPN incompleto para {game_id}")
 
-        return LiveBoxscoreSchema(
+        result = LiveBoxscoreSchema(
             game_id=game_id,
             game_status=state,
             period=period,
@@ -481,6 +513,8 @@ class EspnWnbaSource:
             home_team=home,
             away_team=away,
         )
+        self._live_cache.set(cache_key, result, BOXSCORE_TTL)
+        return result
 
     # ── Gamelog ──────────────────────────────────────────────────────────────
     def get_player_gamelog(self, player_id: int, season: str) -> list[GameLogSchema]:

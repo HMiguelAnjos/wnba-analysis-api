@@ -50,6 +50,8 @@ from src.workers.backfill_worker import start_backfill_worker
 from src.workers.live_games_worker import start_live_games_worker
 from src.workers.season_cache_warmer import start_season_cache_warmer
 
+logger = logging.getLogger(__name__)
+
 # Logging: INFO/WARNING vão pro stdout, ERROR/CRITICAL vão pro stderr.
 #
 # Por que isso importa: Railway (e maioria das clouds) classifica logs por
@@ -615,18 +617,31 @@ def dashboard(
 
 @app.get("/games/live/today", response_model=LiveGamesCachedResponseSchema)
 def today_games():
-    # Fork WNBA: scoreboard ao vivo vem da ESPN (sem worker/cache, busca na
-    # hora — a tela já faz polling). NBA segue pelo cache do worker.
+    # Fork WNBA: scoreboard vem da ESPN, cacheado in-memory dentro do
+    # EspnWnbaSource (SCOREBOARD_TTL). Se falhar (ESPN 403, proxy sem
+    # credit, offseason), devolve rodada vazia (200) — front mostra
+    # "sem jogos hoje" liso em vez de "Falha ao carregar a rodada" (503).
     if getattr(nba, "_espn", None) is not None:
         try:
             return nba._espn.get_today_games()
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Erro ao buscar jogos (ESPN): {exc}")
+            logger.warning("ESPN today_games falhou: %s — devolvendo rodada vazia", exc)
+            now = datetime.now()
+            return LiveGamesCachedResponseSchema(
+                date=now.date().isoformat(),
+                games=[],
+                updated_at=now.isoformat(),
+                age_ms=0,
+            )
     snapshot = live_cache.get_snapshot()
     if snapshot is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Live games data not ready yet. Worker is initializing, try again in a moment.",
+        # NBA path: mesmo tratamento (rodada vazia em vez de 503).
+        now = datetime.now()
+        return LiveGamesCachedResponseSchema(
+            date=now.date().isoformat(),
+            games=[],
+            updated_at=now.isoformat(),
+            age_ms=0,
         )
     return LiveGamesCachedResponseSchema(
         date=snapshot.data.date,
