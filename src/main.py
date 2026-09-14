@@ -228,11 +228,12 @@ app.add_middleware(
     # PR previews, etc.) sem precisar atualizar a env var manualmente.
     # *.up.railway.app cobre os deploys gerados; *.railway.app cobre
     # domínios custom mais curtos. Vercel também incluído por garantia.
-    # nine6.com.br cobre o domínio OFICIAL do produto (clutchpro.nine6.com.br
-    # e qualquer subdomínio/apex), sem depender de env var.
+    # clutchprosports.com é o domínio OFICIAL do produto (nba./wnba./apex);
+    # nine6.com.br mantido como fallback pra ambientes antigos (transição).
     allow_origin_regex=(
         r"https://.*\.(up\.)?railway\.app"
         r"|https://.*\.vercel\.app"
+        r"|https://([a-z0-9-]+\.)*clutchprosports\.com"
         r"|https://([a-z0-9-]+\.)*nine6\.com\.br"
     ),
     allow_credentials=True,
