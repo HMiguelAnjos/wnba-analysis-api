@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from typing import Optional
 
 import requests
@@ -61,14 +62,60 @@ _PROXIES: Optional[dict] = (
 _VERIFY_SSL: bool = not (STATS_PROXY and "scraperapi" in STATS_PROXY.lower())
 
 
+# ── Circuit breaker do ScraperAPI ────────────────────────────────────────────
+# Quando o ScraperAPI responde 403 "You have exhausted the API Credits",
+# cada request seguinte gasta 3-5s esperando por outro 403 previsível — puro
+# desperdício de CPU/latência. O breaker abre um "fusível" por N segundos:
+# durante esse tempo, `_get()` levanta imediatamente (sem hit no proxy),
+# forçando os consumidores a caírem no cache stale (ver `_last_good`).
+# Reset automático quando o TTL passa; primeira request depois testa se
+# a quota voltou.
+_QUOTA_OPEN_UNTIL: float = 0.0   # epoch seconds; 0 = fechado (chamadas passam)
+_QUOTA_COOLDOWN = 15 * 60        # 15 min de "silêncio" após detectar exhausted
+_QUOTA_MARKERS = ("exhausted", "api credits available", "upgrade your subscription")
+
+
+class _QuotaExhaustedError(RuntimeError):
+    """
+    Levantada por `_get()` quando o breaker está aberto ou quando o response
+    do ScraperAPI indica quota zerada. Consumidores devem tratar como uma
+    falha esperada (não um bug) e servir cache stale ou vazio gracefully.
+    """
+
+
+def _quota_open() -> bool:
+    return _QUOTA_OPEN_UNTIL > time.time()
+
+
+def _mark_quota_exhausted(reason: str) -> None:
+    global _QUOTA_OPEN_UNTIL
+    _QUOTA_OPEN_UNTIL = time.time() + _QUOTA_COOLDOWN
+    logger.warning(
+        "ScraperAPI quota exhausted — circuit breaker aberto por %ds (%s)",
+        _QUOTA_COOLDOWN, reason,
+    )
+
+
+def _looks_exhausted(body_preview: str) -> bool:
+    low = (body_preview or "").lower()
+    return any(m in low for m in _QUOTA_MARKERS)
+
+
 def _get(url: str, params: Optional[dict] = None, timeout: int = _TIMEOUT):
     """
-    requests.get wrapper com proxy + headers ESPN padrão.
+    requests.get wrapper com proxy + headers ESPN padrão + circuit breaker.
     Usar SEMPRE ao invés de requests.get direto neste módulo — assim
-    o proxy fica em UM lugar só e o log de "sem proxy" fica visível
-    no startup.
+    o proxy fica em UM lugar só, o log de "sem proxy" fica visível no
+    startup, e o breaker do ScraperAPI pega tudo.
+
+    Levanta `_QuotaExhaustedError` quando o breaker está aberto OU quando
+    o response indica quota zerada. Consumidores fazem fallback pro
+    `_last_good_*` do cache.
     """
-    return requests.get(
+    if _quota_open():
+        raise _QuotaExhaustedError("circuit breaker aberto (aguardando cooldown)")
+
+    r = requests.get(
         url,
         params=params,
         headers=_HEADERS,
@@ -76,6 +123,12 @@ def _get(url: str, params: Optional[dict] = None, timeout: int = _TIMEOUT):
         proxies=_PROXIES,
         verify=_VERIFY_SSL,
     )
+    # Detecta resposta do PRÓPRIO ScraperAPI (não do destino) dizendo que
+    # a quota acabou. Nesses casos o body é HTML/text, não JSON válido.
+    if r.status_code in (401, 403) and _looks_exhausted(r.text[:500]):
+        _mark_quota_exhausted(f"HTTP {r.status_code} em {url[:80]}")
+        raise _QuotaExhaustedError(f"quota do proxy zerada ({r.status_code})")
+    return r
 
 
 if _PROXIES:
@@ -90,14 +143,15 @@ else:
     )
 
 
-ROSTER_TTL = 24 * 3600   # lista de jogadoras muda raramente
-GAMELOG_TTL = 1800       # 30 min — temporada corrente atualiza durante a rodada
+ROSTER_TTL = 24 * 3600      # lista de jogadoras muda raramente
+GAMELOG_TTL = 2 * 3600      # 2h — temporada corrente atualiza pós-jogo, 2h é OK
 # Caches curtos in-memory pra endpoints "quentes" — SEM ELES, cada request
 # do front vira 1 request ESPN via ScraperAPI (queima credit rápido). Com
 # esses TTLs, N users pollando ficam servidos do mesmo hit ESPN.
-SCOREBOARD_TTL = 30      # 30s — placar/status muda em segundos, 30s é OK
-BOXSCORE_TTL = 5         # 5s — clock/placar precisam ser fresh no live
-TEAM_BOARD_TTL = 1800    # 30 min — médias de time mudam ao longo do dia
+SCOREBOARD_TTL = 30         # 30s — placar/status muda em segundos, 30s é OK
+BOXSCORE_TTL = 5            # 5s — clock/placar precisam ser fresh no live
+TEAM_BOARD_TTL = 6 * 3600   # 6h — médias de time mudam lentamente + endpoint
+                            #      faz 14 hits ESPN (1 por time), muito caro
 
 
 def _year_from_season(season: str) -> Optional[int]:
@@ -151,6 +205,11 @@ class EspnWnbaSource:
         # Caches in-memory pros endpoints "quentes" chamados pelo front.
         # Não persistir: TTL curto e ScraperAPI cobra por chamada nova.
         self._live_cache = SimpleCache()
+        # Último response BOM por chave — sem TTL, sobrevive ao expirar do
+        # cache normal e ao circuit breaker do ScraperAPI. Servido como
+        # fallback quando a chamada nova falha (quota exausta, timeout, 403).
+        # Trade-off consciente: prefiro dado ligeiramente antigo a UI vazia.
+        self._last_good: dict[str, object] = {}
 
     # ── Times / rosters ──────────────────────────────────────────────────────
     def _teams(self) -> list[dict]:
@@ -257,13 +316,21 @@ class EspnWnbaSource:
 
         games: list = []
         date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        fetch_failed = False
         try:
             r = _get(f"{_SITE}/scoreboard")
             r.raise_for_status()
             data = r.json()
+        except _QuotaExhaustedError as exc:
+            # ScraperAPI sem credit — sinal esperado, não erro real. Cai
+            # direto no fallback do last_good abaixo sem log verbose.
+            logger.info("ESPN scoreboard: %s — servindo last_good", exc)
+            data = {"events": []}
+            fetch_failed = True
         except Exception as exc:
             logger.warning("ESPN scoreboard falhou: %s", exc)
             data = {"events": []}
+            fetch_failed = True
 
         for ev in data.get("events", []):
             comp = (ev.get("competitions") or [{}])[0]
@@ -298,6 +365,15 @@ class EspnWnbaSource:
                 blowout_risk=None,
             ))
 
+        # Fallback pro último bom quando (a) falhamos e (b) temos cache
+        # do MESMO dia. Impede que o front mostre "sem jogos hoje" quando
+        # ScraperAPI dá 403 no meio do dia mesmo tendo pego a rodada antes.
+        last_good = self._last_good.get("scoreboard")
+        if fetch_failed and not games and last_good is not None:
+            if getattr(last_good, "date", None) == date_str:
+                logger.info("ESPN scoreboard: servindo last_good do dia %s", date_str)
+                return last_good  # type: ignore[return-value]
+
         all_final = bool(games) and all(g.game_status == "final" for g in games)
         now_iso = datetime.now(timezone.utc).isoformat()
         result = LiveGamesCachedResponseSchema(
@@ -309,6 +385,11 @@ class EspnWnbaSource:
             all_final=all_final,
         )
         self._live_cache.set("scoreboard", result, SCOREBOARD_TTL)
+        # Só marca como "último bom" se REALMENTE achou jogos — resposta
+        # vazia (offseason, madrugada, falha silenciosa) não deve substituir
+        # um snapshot bom anterior.
+        if games:
+            self._last_good["scoreboard"] = result
         return result
 
     # ── Team board (pontos pró/contra por time) ──────────────────────────────
@@ -344,8 +425,17 @@ class EspnWnbaSource:
                     "abbr": tm.get("abbreviation", ""),
                     "name": tm.get("displayName", ""),
                 }
+        except _QuotaExhaustedError as exc:
+            logger.info("ESPN team board: %s — servindo last_good", exc)
+            last_good = self._last_good.get(cache_key)
+            if last_good is not None:
+                return last_good  # type: ignore[return-value]
+            return TeamBoardSchema(season=str(year), updated_at=now, available=False, teams=[])
         except Exception as exc:
             logger.warning("ESPN team board /teams falhou: %s", exc)
+            last_good = self._last_good.get(cache_key)
+            if last_good is not None:
+                return last_good  # type: ignore[return-value]
             return TeamBoardSchema(season=str(year), updated_at=now, available=False, teams=[])
 
         teams: list = []
@@ -378,10 +468,17 @@ class EspnWnbaSource:
                 continue
 
         if not teams:
+            # Sem times: se temos last_good, servir. Só sobe False como
+            # último recurso pra evitar dashboard vazio quando quota volta
+            # antes do próximo ciclo.
+            last_good = self._last_good.get(cache_key)
+            if last_good is not None:
+                return last_good  # type: ignore[return-value]
             return TeamBoardSchema(season=str(year), updated_at=now, available=False, teams=[])
         teams.sort(key=lambda t: t.points, reverse=True)
         result = TeamBoardSchema(season=str(year), updated_at=now, available=True, teams=teams)
         self._live_cache.set(cache_key, result, TEAM_BOARD_TTL)
+        self._last_good[cache_key] = result
         return result
 
     # ── Box score ao vivo ────────────────────────────────────────────────────
@@ -409,7 +506,23 @@ class EspnWnbaSource:
             r = _get(f"{_SITE}/summary", params={"event": game_id})
             r.raise_for_status()
             d = r.json()
+        except _QuotaExhaustedError as exc:
+            # Fallback pro último boxscore bom desse jogo. Melhor do que
+            # 502 propagando pro front (que dispara mais retries).
+            last_good = self._last_good.get(cache_key)
+            if last_good is not None:
+                logger.info(
+                    "ESPN summary %s: quota exausta — servindo last_good", game_id,
+                )
+                return last_good  # type: ignore[return-value]
+            raise RuntimeError(f"ESPN summary {game_id}: {exc}") from exc
         except Exception as exc:
+            last_good = self._last_good.get(cache_key)
+            if last_good is not None:
+                logger.warning(
+                    "ESPN summary %s falhou (%s) — servindo last_good", game_id, exc,
+                )
+                return last_good  # type: ignore[return-value]
             raise RuntimeError(f"ESPN summary {game_id} falhou: {exc}") from exc
 
         bx = d.get("boxscore", {})
@@ -514,6 +627,7 @@ class EspnWnbaSource:
             away_team=away,
         )
         self._live_cache.set(cache_key, result, BOXSCORE_TTL)
+        self._last_good[cache_key] = result
         return result
 
     # ── Gamelog ──────────────────────────────────────────────────────────────
