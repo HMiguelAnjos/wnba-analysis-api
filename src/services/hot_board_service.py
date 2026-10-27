@@ -29,6 +29,7 @@ from src.schemas.nba_schemas import (
     ProbableTeam,
 )
 from src.utils.cache import PersistentCache
+from src.utils.i18n_text import coded
 
 logger = logging.getLogger(__name__)
 
@@ -339,10 +340,11 @@ class HotBoardService:
             season=season,
             updated_at=now,
             available=available,
-            note=(
+            note=coded(
+                "lineup.probable_note",
                 "Escalação provável (informativo) — quem costuma jogar "
                 "por minutos da temporada. Não é a escalação oficial; a "
-                "NBA só publica perto do tip."
+                "NBA só publica perto do tip.",
             ),
             home=home,
             away=away,

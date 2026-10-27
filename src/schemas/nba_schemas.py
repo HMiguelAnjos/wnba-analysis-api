@@ -1,5 +1,7 @@
 from pydantic import BaseModel
-from typing import Optional
+
+from src.schemas.i18n_schemas import CodedTextModel, TextCodeSchema
+from typing import ClassVar, Optional
 
 
 class PlayerSchema(BaseModel):
@@ -104,12 +106,15 @@ class ProbableTeam(BaseModel):
     players: list[ProbablePlayer]
 
 
-class ProbableLineupSchema(BaseModel):
+class ProbableLineupSchema(CodedTextModel):
+    I18N_FIELDS: ClassVar[dict[str, str]] = {"note": "note_i18n"}
     game_id: str
     season: str
     updated_at: str
     available: bool             # False = sem dados (NBA bloqueou) → fallback
     note: str                   # rótulo "provável / informativo"
+    # Tradução (out/2026): código + parâmetros do texto acima, pro front traduzir.
+    note_i18n: Optional[TextCodeSchema] = None
     home: ProbableTeam
     away: ProbableTeam
 

@@ -19,6 +19,7 @@ closing_prob/status.
 from __future__ import annotations
 
 from typing import Optional
+from src.utils.i18n_text import coded
 
 # ─── Thresholds (calibração inicial — ajustar com dados de produção) ─────────
 
@@ -123,19 +124,23 @@ def detect_cashout(
         else "MEDIUM"
     )
 
+    # Uma variante por papel × "fecha jogo" — o código não carrega palavra em PT.
     market_pt = {"PTS": "pontos", "REB": "rebotes", "AST": "assistências"}.get(
         market, market.lower()
     )
     role = "titular" if is_starter else "rotação relevante"
-    reason = (
-        f"Jogador {role} no banco agora — tem {current_stat:.0f} "
-        f"{market_pt}, linha {line:g} (faltam {gap:g}). NBA Rotation indica "
-        f"retorno provável (~{expected_remaining_minutes:.0f} min restantes"
-        + (
-            f", {closing_game_probability * 100:.0f}% de fechar jogo"
-            if closing_game_probability > 0 else ""
-        )
-        + "). Atenção pra cashout: a linha tende a subir quando ele voltar."
+    closing = (
+        f", {{closing}}% de fechar jogo" if closing_game_probability > 0 else ""
+    )
+    reason = coded(
+        f"cashout.{'starter' if is_starter else 'rotation'}_{'closing' if closing else 'return'}",
+        "Jogador " + role + " no banco agora — tem {current} " + market_pt
+        + ", linha {line} (faltam {gap}). NBA Rotation indica retorno provável "
+        "(~{minutes} min restantes" + closing
+        + "). Atenção pra cashout: a linha tende a subir quando ele voltar.",
+        current=f"{current_stat:.0f}", market=market, line=f"{line:g}", gap=f"{gap:g}",
+        minutes=f"{expected_remaining_minutes:.0f}",
+        closing=f"{closing_game_probability * 100:.0f}",
     )
 
     return {

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
+from src.utils.i18n_text import coded
 
 
 # Limiares pra classificar status
@@ -126,10 +127,11 @@ def build_context(
     if enough_elapsed and minutes_vs_expected >= MINUTES_DELTA:
         # Jogando MAIS que o esperado (acumulado), em quadra ou não.
         status = "UNEXPECTED_ON_COURT"
-        notes.append(
-            f"Jogando mais que o esperado: {minutes_played:.0f} min jogados "
-            f"vs ~{expected_so_far:.0f} previstos até agora"
-        )
+        notes.append(coded(
+            "rotation.more_than_expected",
+            "Jogando mais que o esperado: {played} min jogados vs ~{expected} previstos até agora",
+            played=f"{minutes_played:.0f}", expected=f"{expected_so_far:.0f}",
+        ))
     elif (
         enough_elapsed
         and not is_player_on_court
@@ -138,27 +140,31 @@ def build_context(
     ):
         # Jogando MENOS que o esperado (acumulado) e está no banco.
         status = "UNEXPECTED_REST"
-        notes.append(
-            f"Jogando menos que o esperado: {minutes_played:.0f} min jogados "
-            f"vs ~{expected_so_far:.0f} previstos até agora — projeção reduzida"
-        )
+        notes.append(coded(
+            "rotation.less_than_expected",
+            "Jogando menos que o esperado: {played} min jogados vs ~{expected} previstos até agora — projeção reduzida",
+            played=f"{minutes_played:.0f}", expected=f"{expected_so_far:.0f}",
+        ))
     else:
         status = base_status
         # Notas de contexto (não-anomalia)
         if not is_player_on_court:
             if is_period_boundary and prob_now >= STRONG_PLAY:
-                notes.append(
-                    "Transição de período — aguardando escalação do novo quarto"
-                )
+                notes.append(coded(
+                    "rotation.period_transition",
+                    "Transição de período — aguardando escalação do novo quarto",
+                ))
             elif prob_now <= PROB_REST:
                 return_minute = _next_play_minute(
                     profile.minute_probabilities, minute_idx
                 )
                 if return_minute is not None:
                     clock_str = _format_minute(return_minute)
-                    notes.append(
-                        f"Descanso típico — costuma voltar por volta de {clock_str}"
-                    )
+                    notes.append(coded(
+                        "rotation.typical_rest",
+                        "Descanso típico — costuma voltar por volta de {clock}",
+                        clock=clock_str,
+                    ))
 
     # ── 2. Blowout risk pro JOGADOR ────────────────────────────────────
     blowout_data = profile.blowout_risk or {}
@@ -170,9 +176,11 @@ def build_context(
         # Blowout claro no Q4
         if return_prob < 0.3:
             blowout_risk = "HIGH"
-            notes.append(
-                f"Blowout no Q4 + jogador costuma sentar nessa situação (perde ~{minutes_lost:.0f}min)"
-            )
+            notes.append(coded(
+                "rotation.blowout_sits",
+                "Blowout no Q4 + jogador costuma sentar nessa situação (perde ~{minutes}min)",
+                minutes=f"{minutes_lost:.0f}",
+            ))
         elif return_prob < 0.5:
             blowout_risk = "MEDIUM"
         else:
@@ -206,9 +214,11 @@ def build_context(
             and is_in_crunch
             and clutch_data.get("usually_closes_games")
         ):
-            notes.append(
-                f"Costuma fechar jogos apertados ({closing_prob*100:.0f}% de prob. no crunch time)"
-            )
+            notes.append(coded(
+                "rotation.closes_games",
+                "Costuma fechar jogos apertados ({pct}% de prob. no crunch time)",
+                pct=f"{closing_prob*100:.0f}",
+            ))
     else:
         closing_prob = 0.0
 
@@ -225,7 +235,9 @@ def build_context(
 
     # ── 5. Note adicional sobre tempo restante esperado ────────────────
     if expected_remaining_minutes < 1.0 and period <= 4 and clock_minutes_remaining > 2.0:
-        notes.append("Provavelmente já encerrou a participação — projeção fechada")
+        notes.append(coded(
+            "rotation.likely_done", "Provavelmente já encerrou a participação — projeção fechada",
+        ))
 
     return RotationContextResult(
         available=True,

@@ -34,6 +34,7 @@ from __future__ import annotations
 from typing import Optional
 
 from src.utils.stats import blowout_role_factor, foul_trouble_multiplier, rest_factor
+from src.utils.i18n_text import coded
 
 
 class ProjectionEngine:
@@ -88,7 +89,7 @@ class ProjectionEngine:
             return {
                 "low": base, "expected": base, "high": base,
                 "confidence": "high",
-                "reason": "Jogo encerrado — valor final consolidado",
+                "reason": coded("projection.final", "Jogo encerrado — valor final consolidado"),
                 "breakdown": {"terminal": "is_final"},
             }
 
@@ -96,7 +97,7 @@ class ProjectionEngine:
             return {
                 "low": 0.0, "expected": 0.0, "high": 0.0,
                 "confidence": "very_low",
-                "reason": "Jogador ainda não entrou em quadra",
+                "reason": coded("projection.not_played", "Jogador ainda não entrou em quadra"),
                 "breakdown": {"terminal": "no_minutes"},
             }
 
@@ -283,7 +284,7 @@ class ProjectionEngine:
                 "expected": round(base, 1),
                 "high": round(base + margin, 1),
                 "confidence": "high",
-                "reason": "Já excedeu minutagem média esperada — projeção fechada",
+                "reason": coded("projection.minutes_exceeded", "Já excedeu minutagem média esperada — projeção fechada"),
                 "breakdown": bd,
             }
 
@@ -299,9 +300,10 @@ class ProjectionEngine:
             return {
                 "low": base, "expected": base, "high": base,
                 "confidence": "very_low",
-                "reason": (
-                    f"Amostra pequena ({minutes:.1f} min sem produção) — "
-                    "aguardando jogador entrar em ritmo"
+                "reason": coded(
+                    "projection.indeterminate",
+                    "Amostra pequena ({minutes} min sem produção) — aguardando jogador entrar em ritmo",
+                    minutes=f"{minutes:.1f}",
                 ),
                 "indeterminate": True,
                 "breakdown": bd,
@@ -622,36 +624,45 @@ class ProjectionEngine:
 
         # ── Reason ────────────────────────────────────────────────────────
         if used_hot_shrinkage:
-            reason = "Ritmo inicial muito acima da média — projeção regrediu pra base histórica"
+            reason = coded("projection.hot_start", "Ritmo inicial muito acima da média — projeção regrediu pra base histórica")
         elif used_heat and heat_score >= 0.30:
-            reason = f"Jogador quente (heat {heat_score:+.2f}) — projeção foi acelerada"
+            reason = coded("projection.hot", "Jogador quente (heat {heat}) — projeção foi acelerada", heat=f"{heat_score:+.2f}")
         elif used_heat and heat_score <= -0.30:
-            reason = f"Jogador frio (heat {heat_score:+.2f}) — projeção foi reduzida"
+            reason = coded("projection.cold", "Jogador frio (heat {heat}) — projeção foi reduzida", heat=f"{heat_score:+.2f}")
         elif is_in_deficit and heat_score <= -0.30:
-            reason = "Jogador em ritmo abaixo do histórico — projeção reduzida"
+            reason = coded("projection.deficit", "Jogador em ritmo abaixo do histórico — projeção reduzida")
         elif used_rotation_blowout:
-            reason = "Risco de poupança em blowout — projeção cortada"
+            reason = coded("projection.blowout_rest", "Risco de poupança em blowout — projeção cortada")
         elif used_clutch:
-            reason = "Jogo apertado + jogador clutch — projeção acelerada"
+            reason = coded("projection.clutch", "Jogo apertado + jogador clutch — projeção acelerada")
         elif used_rest_factor and rest_days == 0:
-            reason = "Back-to-back — projeção reduzida por fadiga"
+            reason = coded("projection.back_to_back", "Back-to-back — projeção reduzida por fadiga")
         elif used_period_rate:
-            reason = f"Rate do Q{period} ajustado por padrão histórico do jogador"
+            reason = coded("projection.period_rate", "Rate do Q{period} ajustado por padrão histórico do jogador", period=period)
         elif blowout_severity > 0.5:
-            role_label = "titular" if is_starter else "reserva"
-            reason = f"Blowout — minutos restantes reduzidos ({role_label})"
+            reason = (
+                coded("projection.blowout_starter", "Blowout — minutos restantes reduzidos (titular)")
+                if is_starter else
+                coded("projection.blowout_bench", "Blowout — minutos restantes reduzidos (reserva)")
+            )
         elif fouls >= 5:
-            reason = f"Foul out iminente ({fouls}F com {game_minutes_remaining:.0f}min restantes) — minutos cortados"
+            reason = coded(
+                "projection.foul_out", "Foul out iminente ({fouls}F com {minutes}min restantes) — minutos cortados",
+                fouls=fouls, minutes=f"{game_minutes_remaining:.0f}",
+            )
         elif fouls >= 4:
-            reason = f"Foul trouble ({fouls}F com {game_minutes_remaining:.0f}min restantes) reduz tempo de quadra"
+            reason = coded(
+                "projection.foul_trouble", "Foul trouble ({fouls}F com {minutes}min restantes) reduz tempo de quadra",
+                fouls=fouls, minutes=f"{game_minutes_remaining:.0f}",
+            )
         elif minutes < 6:
-            reason = "Amostra pequena — projeção ancorada em média histórica"
+            reason = coded("projection.small_sample", "Amostra pequena — projeção ancorada em média histórica")
         elif prior_rate > 0 and current_rate >= prior_rate * 1.2:
-            reason = "Ritmo acima da média — projeção blend favorece o jogo atual"
+            reason = coded("projection.above_pace", "Ritmo acima da média — projeção blend favorece o jogo atual")
         elif prior_rate > 0 and current_rate <= prior_rate * 0.7:
-            reason = "Ritmo abaixo da média — projeção reflete underperformance"
+            reason = coded("projection.below_pace", "Ritmo abaixo da média — projeção reflete underperformance")
         else:
-            reason = "Ritmo dentro do esperado pela média histórica"
+            reason = coded("projection.on_pace", "Ritmo dentro do esperado pela média histórica")
 
         # ── UNEXPECTED_REST cap (mai/2026, v2 — fix caso McDaniels) ────────
         # Refatoração em 2 partes pra evitar falso-positivos onde o cap
@@ -694,9 +705,9 @@ class ProjectionEngine:
                         "rate_ratio": round(rate_ratio, 3),
                     }
                     expected = capped
-                    reason = (
-                        "Descanso fora do padrão + jogador frio + ritmo "
-                        "muito abaixo — projeção truncada"
+                    reason = coded(
+                        "projection.unexpected_rest",
+                        "Descanso fora do padrão + jogador frio + ritmo muito abaixo — projeção truncada",
                     )
                     if confidence in ("high", "medium"):
                         confidence = "low"

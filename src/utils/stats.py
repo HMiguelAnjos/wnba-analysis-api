@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
+from src.utils.i18n_text import coded
 
 if TYPE_CHECKING:
     from src.schemas.nba_schemas import GameLogSchema
@@ -1180,30 +1181,30 @@ def calculate_player_blowout_impact(
         if is_starter and player_minutes >= _STARTER_HIGH_MIN:
             level = "high"
             reason = (
-                "Titular descansado em jogo de blowout"
+                coded("impact.starter_rested", "Titular descansado em jogo de blowout")
                 if is_post_game else
-                "Titular com alta minutagem — alto risco de ser poupado"
+                coded("impact.starter_high_risk", "Titular com alta minutagem — alto risco de ser poupado")
             )
         else:
             level = "medium"
             reason = (
-                "Rotação principal — pode ter perdido minutos no garbage time"
+                coded("impact.rotation_lost", "Rotação principal — pode ter perdido minutos no garbage time")
                 if is_post_game else
-                "Rotação principal — pode perder minutos no garbage time"
+                coded("impact.rotation_may_lose", "Rotação principal — pode perder minutos no garbage time")
             )
     elif game_blowout_pct >= 65:
         level = "medium"
         reason = (
-            "Minutos provavelmente reduzidos pelo placar"
+            coded("impact.minutes_reduced", "Minutos provavelmente reduzidos pelo placar")
             if is_post_game else
-            "Risco moderado de minutos reduzidos"
+            coded("impact.moderate_risk", "Risco moderado de minutos reduzidos")
         )
     else:  # 55-64
         level = "low"
         reason = (
-            "Possível descanso pelo placar"
+            coded("impact.possible_rest", "Possível descanso pelo placar")
             if is_post_game else
-            "Pequeno risco de descanso antecipado"
+            coded("impact.small_risk", "Pequeno risco de descanso antecipado")
         )
 
     return {
@@ -1301,16 +1302,16 @@ def calculate_blowout_risk(
         # poupado, banco ganhou minutos) mesmo após o apito final.
         margin = abs(home_score - away_score)
         if margin >= 30:
-            return (90, "final", f"Blowout — vitória por {margin} pontos")
+            return (90, "final", coded("blowout.final_blowout", "Blowout — vitória por {margin} pontos", margin=margin))
         if margin >= 20:
-            return (75, "final", f"Vitória sólida — margem de {margin} pontos")
+            return (75, "final", coded("blowout.final_solid", "Vitória sólida — margem de {margin} pontos", margin=margin))
         if margin >= 12:
-            return (50, "final", f"Vitória clara — margem de {margin} pontos")
+            return (50, "final", coded("blowout.final_clear", "Vitória clara — margem de {margin} pontos", margin=margin))
         if margin >= 6:
-            return (20, "final", f"Vitória apertada — {margin} pontos")
-        return (5, "final", f"Jogo equilibrado — encerrou em {margin} pts")
+            return (20, "final", coded("blowout.final_close", "Vitória apertada — {margin} pontos", margin=margin))
+        return (5, "final", coded("blowout.final_even", "Jogo equilibrado — encerrou em {margin} pts", margin=margin))
     if game_status == "not_started":
-        return (0, "low", "Jogo ainda não começou")
+        return (0, "low", coded("blowout.not_started", "Jogo ainda não começou"))
 
     score_diff = abs(home_score - away_score)
     period_clamped = max(period, 1)
@@ -1363,17 +1364,20 @@ def calculate_blowout_risk(
 
     # ── Explicação humana ───────────────────────────────────────────────────
     if percentage <= 5:
-        reason = f"Jogo equilibrado ({score_diff} pts no {period_label})"
+        reason = coded("blowout.even", "Jogo equilibrado ({diff} pts no {period})", diff=score_diff, period=period_label)
     elif period_clamped == 1:
-        reason = f"Diferença de {score_diff} pts no Q1 — cedo pra concluir"
+        reason = coded("blowout.q1_early", "Diferença de {diff} pts no Q1 — cedo pra concluir", diff=score_diff)
     elif period_clamped >= 4 and clock_remaining < 4 and score_diff >= 12:
-        reason = f"Diferença de {score_diff} pts no {period_label} com {clock_remaining:.0f} min restantes"
+        reason = coded(
+            "blowout.late_gap", "Diferença de {diff} pts no {period} com {minutes} min restantes",
+            diff=score_diff, period=period_label, minutes=f"{clock_remaining:.0f}",
+        )
     elif percentage >= 65:
-        reason = f"Diferença de {score_diff} pts no {period_label} — garbage time iminente"
+        reason = coded("blowout.garbage_time", "Diferença de {diff} pts no {period} — garbage time iminente", diff=score_diff, period=period_label)
     elif percentage >= 35:
-        reason = f"Diferença de {score_diff} pts no {period_label} — banco pode entrar antes"
+        reason = coded("blowout.bench_early", "Diferença de {diff} pts no {period} — banco pode entrar antes", diff=score_diff, period=period_label)
     else:
-        reason = f"Diferença de {score_diff} pts no {period_label}"
+        reason = coded("blowout.gap", "Diferença de {diff} pts no {period}", diff=score_diff, period=period_label)
 
     return (percentage, level, reason)
 

@@ -1,5 +1,7 @@
-from typing import Literal, Optional
+from typing import ClassVar, Literal, Optional
 from pydantic import BaseModel
+
+from src.schemas.i18n_schemas import CodedTextModel, TextCodeSchema
 
 from src.schemas.anomaly_schemas import HotStatSchema
 
@@ -15,7 +17,8 @@ class LiveTeamSchema(BaseModel):
 # game tiles do scoreboard expõem `blowout_risk` direto — assim o front
 # pode mostrar um badge de alerta no card sem precisar buscar o ranking
 # do jogo. Cálculo é trivial (só usa period/clock/score) e cacheado junto.
-class BlowoutRiskSchema(BaseModel):
+class BlowoutRiskSchema(CodedTextModel):
+    I18N_FIELDS: ClassVar[dict[str, str]] = {"reason": "reason_i18n"}
     """
     Probabilidade estimada de garbage time (titulares saindo, banco assumindo).
     Calculado a partir do contexto do placar + período + tempo restante.
@@ -24,6 +27,8 @@ class BlowoutRiskSchema(BaseModel):
     percentage: int                                                # 0–100
     level: Literal["low", "medium", "high", "final"]
     reason: str                                                    # explicação curta
+    # Tradução (out/2026): código + parâmetros do texto acima, pro front traduzir.
+    reason_i18n: Optional[TextCodeSchema] = None
 
 
 class LiveGameSchema(BaseModel):
@@ -218,7 +223,8 @@ class LivePlayerComparisonSchema(BaseModel):
 # Hot ranking                                                         #
 # ------------------------------------------------------------------ #
 
-class PaceProjectionSchema(BaseModel):
+class PaceProjectionSchema(CodedTextModel):
+    I18N_FIELDS: ClassVar[dict[str, str]] = {"reason": "reason_i18n"}
     """
     Projeção até o fim do jogo com margem de erro + diagnóstico.
 
@@ -241,6 +247,8 @@ class PaceProjectionSchema(BaseModel):
     high: float
     confidence: Literal["very_low", "low", "medium", "high"] = "medium"
     reason: str = ""
+    # Tradução (out/2026): código + parâmetros do texto acima, pro front traduzir.
+    reason_i18n: Optional[TextCodeSchema] = None
     indeterminate: bool = False
     # Breakdown debug (mai/2026): dict opcional com TODOS os intermediários
     # da projeção (prior_rate, current_rate, weight_current, blended_rate
@@ -332,7 +340,8 @@ class ConfidenceBreakdownSchema(BaseModel):
 # direto. Definição duplicada removida — uma única classe ativa.
 
 
-class PlayerBlowoutImpactSchema(BaseModel):
+class PlayerBlowoutImpactSchema(CodedTextModel):
+    I18N_FIELDS: ClassVar[dict[str, str]] = {"reason": "reason_i18n"}
     """
     IMPACTO do blowout sobre um JOGADOR específico.
     Diferente do risco do jogo: aqui dizemos se ESTE jogador tende a perder
@@ -343,6 +352,8 @@ class PlayerBlowoutImpactSchema(BaseModel):
     applies: bool                                                  # True → mostrar flag
     level: Literal["low", "medium", "high"]
     reason: str
+    # Tradução (out/2026): código + parâmetros do texto acima, pro front traduzir.
+    reason_i18n: Optional[TextCodeSchema] = None
 
 
 class QuarterStatsSchema(BaseModel):
@@ -464,7 +475,8 @@ class HotRankingPlayerSchema(BaseModel):
     periods: list[QuarterStatsSchema] = []
 
 
-class CashoutAlertSchema(BaseModel):
+class CashoutAlertSchema(CodedTextModel):
+    I18N_FIELDS: ClassVar[dict[str, str]] = {"reason": "reason_i18n"}
     """
     Alerta CASHOUT (mai/2026) — NÃO é "apostar forte".
 
@@ -482,6 +494,8 @@ class CashoutAlertSchema(BaseModel):
     label: str = "Cashout"
     icon: str = "money"
     reason: str
+    # Tradução (out/2026): código + parâmetros do texto acima, pro front traduzir.
+    reason_i18n: Optional[TextCodeSchema] = None
     confidence: Literal["MEDIUM", "HIGH"]
     # Metadata (debug + display)
     current_stat: float
@@ -493,7 +507,8 @@ class CashoutAlertSchema(BaseModel):
     rotation_status: str               # "LIKELY_TO_RETURN"
 
 
-class RotationContextSchema(BaseModel):
+class RotationContextSchema(CodedTextModel):
+    I18N_FIELDS: ClassVar[dict[str, str]] = {"notes": "notes_i18n"}
     """
     Saída explicável da camada de rotação (nbarotations.info).
     Visível no payload do hot ranking — front consome diretamente.
@@ -505,6 +520,8 @@ class RotationContextSchema(BaseModel):
     closing_game_probability: float                 # 0..1
     rotation_confidence: float                      # 0..1
     notes: list[str] = []
+    # Tradução (out/2026): código + parâmetros do texto acima, pro front traduzir.
+    notes_i18n: Optional[list[Optional[TextCodeSchema]]] = None
     sample_games: int = 0
 
 
@@ -663,7 +680,8 @@ class LineupGameSchema(BaseModel):
 # mas o histórico diz que costuma voltar nos próximos minutos.
 
 
-class PlayerRotationSchema(BaseModel):
+class PlayerRotationSchema(CodedTextModel):
+    I18N_FIELDS: ClassVar[dict[str, str]] = {"notes": "notes_i18n"}
     player_id: int
     name: str
     jersey_num: str
@@ -690,6 +708,8 @@ class PlayerRotationSchema(BaseModel):
     about_to_return: bool = False
     return_in_minutes: Optional[float] = None
     notes: list[str] = []
+    # Tradução (out/2026): código + parâmetros do texto acima, pro front traduzir.
+    notes_i18n: Optional[list[Optional[TextCodeSchema]]] = None
 
 
 class GameRotationsSchema(BaseModel):
